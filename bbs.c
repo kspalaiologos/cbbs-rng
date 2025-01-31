@@ -14,17 +14,20 @@
   #include <omp.h>
 #endif
 
+// ---------------------------------------------------------------------------
+//      Bit integers and OpenMP detection code.
+// ---------------------------------------------------------------------------
 // Define s.t. desired log2(pq) --> N_BITS.
-#define N_BITS 1024
 // For tangible security set at least N_BITS = 8192.
 // For demonstration, set N_BITS = 512.
 // 8192 is the largest power-of-two value supported by GCC.
+#define N_BITS 512
+
 // How many bits to extract each iteration.
 // EXTRACT should not exceed log2(log2(N_BITS)).
 #define EXTRACT 2
 
 typedef unsigned _BitInt(N_BITS) bbsint;
-typedef signed _BitInt(N_BITS) sbbsint;
 typedef unsigned _BitInt(N_BITS * 2) bbs2int;
 typedef unsigned _BitInt(N_BITS * 4) bbs4int;
 
@@ -119,13 +122,12 @@ static bbsint csrand(bbsint max, int ilog) {
     if ((r >>= N_BITS - ilog) < max) return r;
   }
 }
-static bbsint modexp(bbsint bp, bbsint e, bbsint mod, bbs2int M) {
-  bbs2int r = 1; bbs2int base = bp;
-  base = ((bbs4int) (M * base) * mod) >> (N_BITS * 2);
+static bbsint modexp(bbsint bp, bbsint e, bbsint mp, bbs2int M) {
+  bbs2int r = 1; bbs2int base = bp; bbs4int mod = mp;
   while (e) {
     if (e & 1)
-      r = ((bbs4int) (M * (r * base)) * mod) >> (N_BITS * 2);
-    base = ((bbs4int) (M * (base * base)) * mod) >> (N_BITS * 2);
+      r = (mod * (M * (r * base))) >> (N_BITS * 2);
+    base = (mod * (M * (base * base))) >> (N_BITS * 2);
     e >>= 1;
   }
   return r;
@@ -285,7 +287,7 @@ static uint64_t bbs_next64(bbs_t * bbs) {
 //      an infinite stream of random numbers to stdout (64-bit,
 //      native endian). If changed, it displays an experiment.
 // ---------------------------------------------------------------------------
-#if 1
+#if 0
 int main(void) {
   init_secrandom();  init_prime_quotients();
   bbs_t bbs;  bbs_new(&bbs);
