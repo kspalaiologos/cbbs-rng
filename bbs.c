@@ -17,7 +17,7 @@
 // Define s.t. desired log2(pq) --> N_BITS.
 // For tangible security set at least N_BITS = 8192.
 // For demonstration, set N_BITS = 512.
-#define N_BITS 1024
+// 8192 is the largest power-of-two value supported by GCC.
 // How many bits to extract each iteration.
 // EXTRACT should not exceed log2(log2(N_BITS)).
 #define EXTRACT 2
