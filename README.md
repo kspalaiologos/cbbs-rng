@@ -156,3 +156,8 @@ of the generator. Currently the stream mode at 8192 bits of security
 generates outputs at around 5KB/s. This is not acceptable for most
 applications. But BBS is also a bad algorithm performance-wise.
 
+We could use Legendre's conjecture or something similar to first narrow
+down the search range and then use NextPrime-like logic. The Legendre
+conjecture is however unproven. On the other hand, we could try inverting
+PrimePi instead. This would be a more reliable method.
+
