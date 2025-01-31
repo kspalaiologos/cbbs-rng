@@ -15,7 +15,7 @@
 #endif
 
 // Define s.t. desired log2(pq) --> N_BITS.
-#define N_BITS 2048
+#define N_BITS 1024
 // For tangible security set at least N_BITS = 8192.
 // For demonstration, set N_BITS = 512.
 // 8192 is the largest power-of-two value supported by GCC.
