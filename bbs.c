@@ -10,12 +10,27 @@
 #include <stdarg.h>
 #include <errno.h>
 
+#ifdef OPENMP
+  #include <omp.h>
+#endif
+
 // Define s.t. desired log2(pq) --> N_BITS.
-#define N_BITS 512
+// For tangible security set at least N_BITS = 8192.
+// For demonstration, set N_BITS = 512.
+#define N_BITS 1024
+// How many bits to extract each iteration.
+// EXTRACT should not exceed log2(log2(N_BITS)).
+#define EXTRACT 2
 typedef unsigned _BitInt(N_BITS) bbsint;
 typedef signed _BitInt(N_BITS) sbbsint;
 typedef unsigned _BitInt(N_BITS * 2) bbs2int;
 typedef unsigned _BitInt(N_BITS * 4) bbs4int;
+
+#if N_BITS > 1024
+  #ifndef OPENMP
+    #error "That won't work."
+  #endif
+#endif
 
 // ---------------------------------------------------------------------------
 //      Cryptographically secure random number source. Used
@@ -102,13 +117,13 @@ static bbsint csrand(bbsint max, int ilog) {
     if ((r >>= N_BITS - ilog) < max) return r;
   }
 }
-static bbsint modexp(bbsint base, bbsint e, bbsint mod, bbs2int M) {
-  bbsint r = 1;
+static bbsint modexp(bbsint bp, bbsint e, bbsint mod, bbs2int M) {
+  bbs2int r = 1; bbs2int base = bp;
   base = ((bbs4int) (M * base) * mod) >> (N_BITS * 2);
   while (e) {
     if (e & 1)
-      r = ((bbs4int) (M * ((bbs2int) r * base)) * mod) >> (N_BITS * 2);
-    base = ((bbs4int) (M * ((bbs2int) base * base)) * mod) >> (N_BITS * 2);
+      r = ((bbs4int) (M * (r * base)) * mod) >> (N_BITS * 2);
+    base = ((bbs4int) (M * (base * base)) * mod) >> (N_BITS * 2);
     e >>= 1;
   }
   return r;
@@ -140,19 +155,54 @@ static int is_prime_high(bbsint n, int iter) {
 //      of the cases (2^-128 error rate due to ROUNDS = 64 in Miller-Rabin).
 //      `gcd((p-3)/2, (q-3)/2)' should be small for maximised
 //      period length. Not strictly necessary; nmplemented here.
+//      Per Bertrand postulate we always find a suitable prime.
 // ---------------------------------------------------------------------------
-static void generate_primes(bbsint * p1, bbsint * p2) {
-  bbsint p, q;  const int ROUNDS = 64;
-  do {
-    p = csrand(((bbsint) 1) << (N_BITS / 2), N_BITS / 2); p |= 0b11;
-  } while (!is_prime_low(p) || !is_prime_high(p, ROUNDS)
-        || !is_prime_low(2 * p + 1) || !is_prime_high(2 * p + 1, ROUNDS)); 
-  do {
-    q = csrand(((bbsint) 1) << (N_BITS / 2), N_BITS / 2); q |= 0b11;
-  } while (p == q || !is_prime_low(q) || !is_prime_high(q, ROUNDS)
-        || !is_prime_low(2 * q + 1) || !is_prime_high(2 * q + 1, ROUNDS));
-  *p1 = 2 * p + 1; *p2 = 2 * q + 1;
-}
+#ifndef OPENMP
+  static void generate_primes(bbsint * p1, bbsint * p2) {
+    bbsint p, q;  const int ROUNDS = 64;
+    p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
+    p |= 0b11; do {
+      p += 4;
+    } while (!is_prime_low(p) || !is_prime_low(2 * p + 1)
+          || !is_prime_high(p, ROUNDS) || !is_prime_high(2 * p + 1, ROUNDS));
+    q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
+    q |= 0b11; do {
+      q += 4;
+    } while (p == q || !is_prime_low(q) || !is_prime_low(2 * q + 1)
+           || !is_prime_high(q, ROUNDS) || !is_prime_high(2 * q + 1, ROUNDS));
+    *p1 = 2 * p + 1; *p2 = 2 * q + 1;
+  }
+#else
+  static void generate_primes(bbsint * p1, bbsint * p2) {
+    const int ROUNDS = 64;  _Atomic(int) found;
+    found = 0;
+    #pragma omp parallel for
+    for (int i = 0; i < omp_get_num_threads(); i++) {
+      bbsint p;
+      p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
+      p |= 0b11; do {
+        p += 4;
+      } while (!found && (!is_prime_low(p) || !is_prime_low(2 * p + 1)
+            || !is_prime_high(p, ROUNDS)
+            || !is_prime_high(2 * p + 1, ROUNDS)));
+      #pragma omp critical
+      { if (!found) *p1 = 2 * p + 1, found = 1; }
+    }
+    found = 0;
+    #pragma omp parallel for
+    for (int i = 0; i < omp_get_num_threads(); i++) {
+      bbsint q, p = *p1;
+      q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)) - N_BITS, N_BITS / 2 - 2);
+      q |= 0b11; do {
+        q += 4;
+      } while (!found && (!is_prime_low(q) || !is_prime_low(2 * q + 1)
+            || !is_prime_high(q, ROUNDS) || !is_prime_high(2 * q + 1, ROUNDS)
+            || 2 * q + 1 == p));
+      #pragma omp critical
+      { if (!found) *p2 = 2 * q + 1, found = 1; }
+    }
+  }
+#endif
 
 // ---------------------------------------------------------------------------
 //      Greatest common divisor via Stein's algorithm.
@@ -205,15 +255,21 @@ static void bbs_set(bbs_t * bbs, int i) {
   bbs->pos = i;
 }
 static bbsint bbs_next(bbs_t * bbs, int bits) {
-  bbsint r = 0;
-  for (int i = bits; i != 0; --i) {
+  bbsint r = 0; int i;
+  for (i = bits; i > EXTRACT; i -= EXTRACT) {
+    bbs_step(bbs); r = (r << EXTRACT) | (bbs->x & ((1 << EXTRACT) - 1));
+  }
+  for (; i != 0; --i) {
     bbs_step(bbs); r = (r << 1) | (bbs->x & 1);
   }
   return r;
 }
 static uint64_t bbs_next64(bbs_t * bbs) {
-  uint64_t r = 0;
-  for (int i = 64; i != 0; --i) {
+  uint64_t r = 0; int i;
+  for (i = 64; i > EXTRACT; i -= EXTRACT) {
+    bbs_step(bbs); r = (r << EXTRACT) | (bbs->x & ((1 << EXTRACT) - 1));
+  }
+  for (; i != 0; --i) {
     bbs_step(bbs); r = (r << 1) | (bbs->x & 1);
   }
   return r;
