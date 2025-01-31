@@ -156,20 +156,24 @@ static int is_prime_high(bbsint n, int iter) {
 //      `gcd((p-3)/2, (q-3)/2)' should be small for maximised
 //      period length. Not strictly necessary; nmplemented here.
 //      Per Bertrand postulate we always find a suitable prime.
+//      
+//      Optimisation:
+//      We know that k = (p - 1)/2 (so p = 2k + 1) is prime. Then
+//      2^(p - 1) = 1 (mod p) implies that p is prime as well.
 // ---------------------------------------------------------------------------
 #ifndef OPENMP
   static void generate_primes(bbsint * p1, bbsint * p2) {
-    bbsint p, q;  const int ROUNDS = 64;
+    bbsint p, q, r;  const int ROUNDS = 64;
     do {
       p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
-      p |= 0b11;
-    } while (!is_prime_low(p) || !is_prime_low(2 * p + 1)
-          || !is_prime_high(p, ROUNDS) || !is_prime_high(2 * p + 1, ROUNDS));
-    q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
-    q |= 0b11; do {
-      q += 4;
-    } while (p == q || !is_prime_low(q) || !is_prime_low(2 * q + 1)
-           || !is_prime_high(q, ROUNDS) || !is_prime_high(2 * q + 1, ROUNDS));
+      p |= 0b11; r = 2 * p + 1;
+    } while (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
+          || modexp(2, r - 1, r, ((bbs2int) -1) / r + 1) != 1);
+    do {
+      q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
+      q |= 0b11; r = 2 * q + 1;
+    } while (p == q || !is_prime_low(r) || !is_prime_high(r, ROUNDS)
+           || modexp(2, r - 1, r, ((bbs2int) -1) / r + 1) != 1);
     *p1 = 2 * p + 1; *p2 = 2 * q + 1;
   }
 #else
@@ -178,25 +182,24 @@ static int is_prime_high(bbsint n, int iter) {
     found = 0;
     #pragma omp parallel for
     for (int i = 0; i < omp_get_num_threads(); i++) {
-      bbsint p;
+      bbsint p, r;
       do {
         p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
-        p |= 0b11;
-      } while (!found && (!is_prime_low(p) || !is_prime_low(2 * p + 1)
-            || !is_prime_high(p, ROUNDS)
-            || !is_prime_high(2 * p + 1, ROUNDS)));
+        p |= 0b11; r = 2 * p + 1;
+      } while (!found && (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
+            || modexp(2, r - 1, r, ((bbs2int) -1) / r + 1) != 1));
       #pragma omp critical
       { if (!found) *p1 = 2 * p + 1, found = 1; }
     }
     found = 0;
     #pragma omp parallel for
     for (int i = 0; i < omp_get_num_threads(); i++) {
-      bbsint q, p = *p1;
+      bbsint q, p = *p1, r;
       do {
         q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)) - N_BITS, N_BITS / 2 - 2);
-        q |= 0b11;
-      } while (!found && (!is_prime_low(q) || !is_prime_low(2 * q + 1)
-            || !is_prime_high(q, ROUNDS) || !is_prime_high(2 * q + 1, ROUNDS)
+        q |= 0b11; r = 2 * q + 1;
+      } while (!found && (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
+            || modexp(2, r - 1, r, ((bbs2int) -1) / r + 1) != 1
             || 2 * q + 1 == p));
       #pragma omp critical
       { if (!found) *p2 = 2 * q + 1, found = 1; }
