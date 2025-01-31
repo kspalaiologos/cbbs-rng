@@ -151,4 +151,8 @@ fe213e8114afac4a3af3e47007c985460e9e406e7e01c90b72948006f5cff0a136e7d1
 
 ## Improvements
 
-A better starting prime generation algorithm.
+A better starting prime generation algorithm. Decrease the overhead
+of the generator. Currently the stream mode at 8192 bits of security
+generates outputs at around 5KB/s. This is not acceptable for most
+applications. But BBS is also a bad algorithm performance-wise.
+
