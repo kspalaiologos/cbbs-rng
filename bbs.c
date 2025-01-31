@@ -160,9 +160,9 @@ static int is_prime_high(bbsint n, int iter) {
 #ifndef OPENMP
   static void generate_primes(bbsint * p1, bbsint * p2) {
     bbsint p, q;  const int ROUNDS = 64;
-    p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
-    p |= 0b11; do {
-      p += 4;
+    do {
+      p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
+      p |= 0b11;
     } while (!is_prime_low(p) || !is_prime_low(2 * p + 1)
           || !is_prime_high(p, ROUNDS) || !is_prime_high(2 * p + 1, ROUNDS));
     q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
@@ -179,9 +179,9 @@ static int is_prime_high(bbsint n, int iter) {
     #pragma omp parallel for
     for (int i = 0; i < omp_get_num_threads(); i++) {
       bbsint p;
-      p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
-      p |= 0b11; do {
-        p += 4;
+      do {
+        p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
+        p |= 0b11;
       } while (!found && (!is_prime_low(p) || !is_prime_low(2 * p + 1)
             || !is_prime_high(p, ROUNDS)
             || !is_prime_high(2 * p + 1, ROUNDS)));
@@ -192,9 +192,9 @@ static int is_prime_high(bbsint n, int iter) {
     #pragma omp parallel for
     for (int i = 0; i < omp_get_num_threads(); i++) {
       bbsint q, p = *p1;
-      q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)) - N_BITS, N_BITS / 2 - 2);
-      q |= 0b11; do {
-        q += 4;
+      do {
+        q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)) - N_BITS, N_BITS / 2 - 2);
+        q |= 0b11;
       } while (!found && (!is_prime_low(q) || !is_prime_low(2 * q + 1)
             || !is_prime_high(q, ROUNDS) || !is_prime_high(2 * q + 1, ROUNDS)
             || 2 * q + 1 == p));

@@ -118,3 +118,6 @@ d3c9ee7b315536058886a05a34da601ef2ed603fdc3ea4059df0a5a1cf6e84c1d5779d
 fc9fee4fedd57e8a32fbb9d4cdf7
 ```
 
+## Improvements
+
+A better starting prime generation algorithm.
