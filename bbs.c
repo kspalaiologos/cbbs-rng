@@ -15,12 +15,14 @@
 #endif
 
 // Define s.t. desired log2(pq) --> N_BITS.
+#define N_BITS 2048
 // For tangible security set at least N_BITS = 8192.
 // For demonstration, set N_BITS = 512.
 // 8192 is the largest power-of-two value supported by GCC.
 // How many bits to extract each iteration.
 // EXTRACT should not exceed log2(log2(N_BITS)).
 #define EXTRACT 2
+
 typedef unsigned _BitInt(N_BITS) bbsint;
 typedef signed _BitInt(N_BITS) sbbsint;
 typedef unsigned _BitInt(N_BITS * 2) bbs2int;
