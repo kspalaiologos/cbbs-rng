@@ -222,10 +222,10 @@ bbsint gcd(bbsint a, bbsint b) {
   b >>= bz;
   while (a != 0) {
     a >>= az;
-    sbbsint diff = ((sbbsint) b) - a;
+    bbsint diff = b - a;
     az = ctz(diff);
     b = a < b ? a : b;
-    a = diff < 0 ? -diff : diff;
+    a = diff & ((bbsint) 1 << (N_BITS - 1)) ? 1 + ~diff : diff;
     if (a == b) return a;
   }
   return b << shift;
@@ -271,7 +271,7 @@ static bbsint bbs_next(bbs_t * bbs, int bits) {
 }
 static uint64_t bbs_next64(bbs_t * bbs) {
   uint64_t r = 0; int i;
-  for (i = 64; i > EXTRACT; i -= EXTRACT) {
+  for (i = 64; i >= EXTRACT; i -= EXTRACT) {
     bbs_step(bbs); r = (r << EXTRACT) | (bbs->x & ((1 << EXTRACT) - 1));
   }
   for (; i != 0; --i) {
@@ -304,7 +304,7 @@ int main(void) {
   printf("Next 10 outputs (64-bit) - position %d:\n", bbs.pos);
   for (int i = 0; i < 10; i++)
     printf("%016lx\n", bbs_next64(&bbs));
-  bbs_set(&bbs, 64);
+  bbs_set(&bbs, 32);
   printf("Rewinding back to after 1st output: %d:\n", bbs.pos);
   for (int i = 0; i < 10; i++)
     printf("%016lx\n", bbs_next64(&bbs));
