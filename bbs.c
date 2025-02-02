@@ -20,16 +20,10 @@
 // Define s.t. desired log2(pq) --> N_BITS.
 // For tangible security set at least N_BITS = 8192.
 // For demonstration, set N_BITS = 512.
-// 8192 is the largest power-of-two value supported by GCC.
-#define N_BITS 512
-
-// How many bits to extract each iteration.
-// EXTRACT should not exceed log2(log2(N_BITS)).
-#define EXTRACT 2
+#define N_BITS 8192
 
 typedef unsigned _BitInt(N_BITS) bbsint;
 typedef unsigned _BitInt(N_BITS * 2) bbs2int;
-typedef unsigned _BitInt(N_BITS * 4) bbs4int;
 
 #if N_BITS > 1024
   #ifndef OPENMP
@@ -87,7 +81,7 @@ static void secrandom(void * buf, size_t len) { // Doug Kaufman's NOISE.SYS
 // ---------------------------------------------------------------------------
 //      Low-level, preliminary primality test (fixed size sieve).
 //      Assumes that inputs to the algorithm `p' are p <= 2^(N_BITS - 1).
-//      and further p mod 4 = 3. Uses Barrett's algorithm for division.
+//      and further p mod 4 = 3. Also uses Fermat's little theorem.
 // ---------------------------------------------------------------------------
 #define NPRIMES 99
 static const unsigned primes[NPRIMES] = {
@@ -99,15 +93,22 @@ static const unsigned primes[NPRIMES] = {
   419, 421, 431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487, 491, 499,
   503, 509, 521, 523
 };
-static bbsint prime_barrett[NPRIMES];
-static void init_prime_quotients(void) {
+static bbs2int barrett_cache[NPRIMES];
+static void populate_barrett_cache(void) {
   for (unsigned i = 0; i < NPRIMES; i++)
-    prime_barrett[i] = ((bbsint) -1) / primes[i] + 1;
+    barrett_cache[i] = ((bbs2int) -1) / primes[i] + 1;
 }
 static int is_prime_low(bbsint n) {
   for (unsigned i = 0; i < NPRIMES; i++)
-    if (n * prime_barrett[i] <= prime_barrett[i] - 1) return 0;
-  return 1;
+    if (barrett_cache[i] * n < barrett_cache[i]) return 0;
+  bbsint base = 2, e = n - 1, r = 1;
+  while (e) {
+    if (e & 1)
+      r = (((bbs2int) r) * base) % n;
+    base = (((bbs2int) base) * base) % n;
+    e >>= 1;
+  }
+  return r == 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,12 +123,12 @@ static bbsint csrand(bbsint max, int ilog) {
     if ((r >>= N_BITS - ilog) < max) return r;
   }
 }
-static bbsint modexp(bbsint bp, bbsint e, bbsint mp, bbs2int M) {
-  bbs2int r = 1; bbs2int base = bp; bbs4int mod = mp;
+static bbsint modexp(bbsint base, bbsint e, bbsint mod) {
+  bbsint r = 1;
   while (e) {
     if (e & 1)
-      r = (mod * (M * (r * base))) >> (N_BITS * 2);
-    base = (mod * (M * (base * base))) >> (N_BITS * 2);
+      r = (((bbs2int) r) * base) % mod;
+    base = (((bbs2int) base) * base) % mod;
     e >>= 1;
   }
   return r;
@@ -136,15 +137,14 @@ static int is_prime_high(bbsint n, int iter) {
   int s = 0;  bbsint d = n - 1;
   while ((d & 1) == 0) { d >>= 1; s++; }
   int ilog = ilog2(n - 3);
-  const bbs2int M = ((bbs2int) -1) / n + 1;
   for (int i = 0; i < iter; i++) {
     bbsint a = 2 + csrand(n - 3, ilog);
-    bbsint x = modexp(a, d, n, M);
+    bbsint x = modexp(a, d, n);
     if (x == 1 || x == n - 1)
       continue;
     int c = 0;
     for (int r = 1; r < s; r++) {
-      x = ((bbs4int) (M * (x * x)) * n) >> (N_BITS * 2);
+      x = (((bbs2int) x) * x) % n;
       if (x == n - 1) { c = 1; break; }
     }
     if(!c) return 0;
@@ -172,12 +172,12 @@ static int is_prime_high(bbsint n, int iter) {
       p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
       p |= 0b11; r = 2 * p + 1;
     } while (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
-          || modexp(2, r - 1, r, ((bbs2int) -1) / r + 1) != 1);
+          || modexp(2, r - 1, r) != 1);
     do {
       q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
       q |= 0b11; r = 2 * q + 1;
     } while (p == q || !is_prime_low(r) || !is_prime_high(r, ROUNDS)
-           || modexp(2, r - 1, r, ((bbs2int) -1) / r + 1) != 1);
+           || modexp(2, r - 1, r) != 1);
     *p1 = 2 * p + 1; *p2 = 2 * q + 1;
   }
 #else
@@ -191,7 +191,7 @@ static int is_prime_high(bbsint n, int iter) {
         p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
         p |= 0b11; r = 2 * p + 1;
       } while (!found && (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
-            || modexp(2, r - 1, r, ((bbs2int) -1) / r + 1) != 1));
+            || modexp(2, r - 1, r) != 1));
       #pragma omp critical
       { if (!found) *p1 = 2 * p + 1, found = 1; }
     }
@@ -203,8 +203,7 @@ static int is_prime_high(bbsint n, int iter) {
         q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)) - N_BITS, N_BITS / 2 - 2);
         q |= 0b11; r = 2 * q + 1;
       } while (!found && (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
-            || modexp(2, r - 1, r, ((bbs2int) -1) / r + 1) != 1
-            || 2 * q + 1 == p));
+            || modexp(2, r - 1, r) != 1 || 2 * q + 1 == p));
       #pragma omp critical
       { if (!found) *p2 = 2 * q + 1, found = 1; }
     }
@@ -236,7 +235,7 @@ bbsint gcd(bbsint a, bbsint b) {
 // ---------------------------------------------------------------------------
 //      Interface to the Blum Blum Shub generator.
 // ---------------------------------------------------------------------------
-typedef struct { bbsint pq, x, x0, c; bbs2int cache, Mc; int pos; } bbs_t;
+typedef struct { bbsint pq, x, x0, c; int pos; } bbs_t;
 static void bbs_new(bbs_t * bbs) {
   bbsint p, q;  generate_primes(&p, &q);
   bbs->pq = p * q;
@@ -246,40 +245,42 @@ static void bbs_new(bbs_t * bbs) {
     if (bbs->x % p != 0 && bbs->x % q != 0) break;
   }
   bbs->x0 = bbs->x;
-  bbs->cache = ((bbs2int) -1) / bbs->pq + 1;
   bbs->c = (p - 1) * (q - 1) / gcd(p - 1, q - 1);
-  bbs->Mc = ((bbs2int) -1) / bbs->c + 1;
   bbs->pos = 0;
 }
 static void bbs_step(bbs_t * bbs) {
   bbs2int sq = ((bbs2int) bbs->x) * bbs->x;
-  bbs->x = ((bbs4int) (bbs->cache * sq) * bbs->pq) >> (N_BITS * 2);
+  bbs->x = sq % bbs->pq;
   bbs->pos++;
 }
-static void bbs_set(bbs_t * bbs, int i) {
-  bbsint arg = modexp(2, i, bbs->c, bbs->Mc);
-  bbs->x = modexp(bbs->x0, arg, bbs->pq, bbs->cache);
+static void bbs_set(bbs_t * bbs, unsigned i) {
+  bbsint arg = modexp(2, i, bbs->c);
+  bbs->x = modexp(bbs->x0, arg, bbs->pq);
   bbs->pos = i;
 }
 static bbsint bbs_next(bbs_t * bbs, int bits) {
-  bbsint r = 0; int i;
-  for (i = bits; i > EXTRACT; i -= EXTRACT) {
-    bbs_step(bbs); r = (r << EXTRACT) | (bbs->x & ((1 << EXTRACT) - 1));
-  }
-  for (; i != 0; --i) {
+  bbsint r = 0;
+  for (int i = bits; i != 0; --i) {
     bbs_step(bbs); r = (r << 1) | (bbs->x & 1);
   }
   return r;
 }
 static uint64_t bbs_next64(bbs_t * bbs) {
-  uint64_t r = 0; int i;
-  for (i = 64; i >= EXTRACT; i -= EXTRACT) {
-    bbs_step(bbs); r = (r << EXTRACT) | (bbs->x & ((1 << EXTRACT) - 1));
-  }
-  for (; i != 0; --i) {
+  uint64_t r = 0;
+  for (int i = 64; i != 0; --i) {
     bbs_step(bbs); r = (r << 1) | (bbs->x & 1);
   }
   return r;
+}
+static void bbs_nextbytes(bbs_t * bbs, void * bp, size_t len) {
+  uint8_t * buf = bp;
+  for (size_t i = 0; i < len; i++) {
+    uint8_t r = 0;
+    for (int i = 8; i != 0; --i) {
+      bbs_step(bbs); r = (r << 1) | (bbs->x & 1);
+    }
+    buf[i] = r;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +290,7 @@ static uint64_t bbs_next64(bbs_t * bbs) {
 // ---------------------------------------------------------------------------
 #if 0
 int main(void) {
-  init_secrandom();  init_prime_quotients();
+  init_secrandom();  populate_barrett_cache();
   bbs_t bbs;  bbs_new(&bbs);
   for (;;) {
     uint64_t r = bbs_next64(&bbs);
@@ -298,17 +299,28 @@ int main(void) {
 }
 #else
 int main(void) {
-  init_secrandom();  init_prime_quotients();
+  init_secrandom();  populate_barrett_cache();
   bbs_t bbs;  bbs_new(&bbs);
-  printf("First 10 outputs (64-bit):\n");
-  for (int i = 0; i < 10; i++)
-    printf("%016lx\n", bbs_next64(&bbs));
-  printf("Next 10 outputs (64-bit) - position %d:\n", bbs.pos);
-  for (int i = 0; i < 10; i++)
-    printf("%016lx\n", bbs_next64(&bbs));
-  bbs_set(&bbs, 32);
-  printf("Rewinding back to after 1st output: %d:\n", bbs.pos);
-  for (int i = 0; i < 10; i++)
-    printf("%016lx\n", bbs_next64(&bbs));
+  uint8_t buf[64];
+  printf("Current position: %d\n", bbs.pos);
+  printf("Probing 64 bytes of data: ");
+  bbs_nextbytes(&bbs, buf, 64);
+  for (int i = 0; i < 64; i++)
+    printf("%02x", buf[i]);
+  printf("\n");
+  printf("Current position: %d\n", bbs.pos);
+  printf("Probing another 64 bytes of data: ");
+  bbs_nextbytes(&bbs, buf, 64);
+  for (int i = 0; i < 64; i++)
+    printf("%02x", buf[i]);
+  printf("\n");
+  printf("Rewinding to position 512.\n");
+  bbs_set(&bbs, 512);
+  printf("Current position: %d\n", bbs.pos);
+  printf("Probing 64 bytes of data: ");
+  bbs_nextbytes(&bbs, buf, 64);
+  for (int i = 0; i < 64; i++)
+    printf("%02x", buf[i]);
+  printf("\n");
 }
 #endif
