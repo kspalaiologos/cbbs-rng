@@ -85,7 +85,7 @@ static void secrandom(void * buf, size_t len) { // Doug Kaufman's NOISE.SYS
 //      Assumes that inputs to the algorithm `p' are p <= 2^(N_BITS - 1).
 //      and further p mod 4 = 3. Also uses Fermat's little theorem.
 // ---------------------------------------------------------------------------
-#define NPRIMES 8192
+#define NPRIMES 4096
 static unsigned primes[NPRIMES];
 static bbs2int barrett_cache[NPRIMES];
 static void populate_barrett_cache(void) {
@@ -291,6 +291,7 @@ static uint64_t bbs_next64(bbs_t * bbs) {
 }
 static void bbs_nextbytes(bbs_t * bbs, void * bp, size_t len) {
   uint8_t * buf = bp;
+#ifndef OPENMP
   for (size_t i = 0; i < len; i++) {
     uint8_t r = 0;
     for (int i = 8; i != 0; --i) {
@@ -298,6 +299,36 @@ static void bbs_nextbytes(bbs_t * bbs, void * bp, size_t len) {
     }
     buf[i] = r;
   }
+#else
+  size_t threads;
+  #pragma omp parallel
+  {
+    #pragma omp single
+    threads = omp_get_num_threads();
+  }
+  size_t chunk = len / threads;
+  #pragma omp parallel for schedule(static)
+  for (size_t i = 0; i < threads; i++) {
+    bbs_t clone = *bbs;
+    bbs_set(&clone, bbs->pos + i * chunk * 8);
+    for (size_t j = 0; j < chunk; j++) {
+      uint8_t r = 0;
+      for (int i = 8; i != 0; --i) {
+        bbs_step(&clone); r = (r << 1) | (clone.x & 1);
+      }
+      buf[i * chunk + j] = r;
+    }
+  }
+  bbs_set(bbs, bbs->pos + len * 8);
+  size_t remainder = len % threads;
+  for (size_t i = 0; i < remainder; i++) {
+    uint8_t r = 0;
+    for (int i = 8; i != 0; --i) {
+      bbs_step(bbs); r = (r << 1) | (bbs->x & 1);
+    }
+    buf[len - remainder + i] = r;
+  }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -309,9 +340,10 @@ static void bbs_nextbytes(bbs_t * bbs, void * bp, size_t len) {
 int main(void) {
   init_secrandom();  populate_barrett_cache();
   bbs_t bbs;  bbs_new(&bbs);
+  uint8_t * buffer = malloc(1 << 24);
   for (;;) {
-    uint64_t r = bbs_next64(&bbs);
-    fwrite(&r, 1, 8, stdout);
+    bbs_nextbytes(&bbs, buffer, 1 << 24);
+    fwrite(buffer, 1, 1 << 24, stdout);
   }
 }
 #else
