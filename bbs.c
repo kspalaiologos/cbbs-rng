@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 #include <errno.h>
 
 #ifdef OPENMP
@@ -80,35 +81,57 @@ static void secrandom(void * buf, size_t len) { // Doug Kaufman's NOISE.SYS
 
 // ---------------------------------------------------------------------------
 //      Low-level, preliminary primality test (fixed size sieve).
+//      Pre-generates primes via the Sieve of Atkin.
 //      Assumes that inputs to the algorithm `p' are p <= 2^(N_BITS - 1).
 //      and further p mod 4 = 3. Also uses Fermat's little theorem.
 // ---------------------------------------------------------------------------
-#define NPRIMES 99
-static const unsigned primes[NPRIMES] = {
-  2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67,
-  71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149,
-  151, 157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 229,
-  233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 311, 313,
-  317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383, 389, 397, 401, 409,
-  419, 421, 431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487, 491, 499,
-  503, 509, 521, 523
-};
+#define NPRIMES 2048
+static unsigned primes[NPRIMES];
 static bbs2int barrett_cache[NPRIMES];
 static void populate_barrett_cache(void) {
+  int limit = NPRIMES * log2(NPRIMES) * 1.2;
+  if (limit < 2) limit = 2;
+  char * is_prime = calloc(limit + 1, 1);
+  is_prime[2] = 1;
+  is_prime[3] = 1;
+  for (int x = 1; x * x <= limit; x++) {
+    for (int y = 1; y * y <= limit; y++) {
+      int n = 4 * x * x + y * y;
+      if (n <= limit && (n % 12 == 1 || n % 12 == 5))
+        is_prime[n] = !is_prime[n];
+      n = 3 * x * x + y * y;
+      if (n <= limit && n % 12 == 7)
+        is_prime[n] = !is_prime[n];
+      n = 3 * x * x - y * y;
+      if (x > y && n <= limit && n % 12 == 11)
+        is_prime[n] = !is_prime[n];
+    }
+  }
+  for (int r = 5; r * r <= limit; r++)
+    if (is_prime[r])
+      for (int i = r * r; i <= limit; i += r * r)
+        is_prime[i] = 0;
+  int count = 0;
+  for (int i = 2; i <= limit && count < NPRIMES; i++)
+    if (is_prime[i]) primes[count++] = i;
+  free(is_prime);
   for (unsigned i = 0; i < NPRIMES; i++)
     barrett_cache[i] = ((bbs2int) -1) / primes[i] + 1;
+}
+static bbsint modexp_half(bbsint base, bbsint e, bbsint mod) {
+  bbsint r = 1;
+  while (e) {
+    if (e & 1)
+      r = r * base % mod;
+    base = base * base % mod;
+    e >>= 1;
+  }
+  return r;
 }
 static int is_prime_low(bbsint n) {
   for (unsigned i = 0; i < NPRIMES; i++)
     if (barrett_cache[i] * n < barrett_cache[i]) return 0;
-  bbsint base = 2, e = n - 1, r = 1;
-  while (e) {
-    if (e & 1)
-      r = (((bbs2int) r) * base) % n;
-    base = (((bbs2int) base) * base) % n;
-    e >>= 1;
-  }
-  return r == 1;
+  return modexp_half(2, n - 1, n) == 1; // Fermat.
 }
 
 // ---------------------------------------------------------------------------
@@ -123,28 +146,18 @@ static bbsint csrand(bbsint max, int ilog) {
     if ((r >>= N_BITS - ilog) < max) return r;
   }
 }
-static bbsint modexp(bbsint base, bbsint e, bbsint mod) {
-  bbsint r = 1;
-  while (e) {
-    if (e & 1)
-      r = (((bbs2int) r) * base) % mod;
-    base = (((bbs2int) base) * base) % mod;
-    e >>= 1;
-  }
-  return r;
-}
 static int is_prime_high(bbsint n, int iter) {
   int s = 0;  bbsint d = n - 1;
   while ((d & 1) == 0) { d >>= 1; s++; }
   int ilog = ilog2(n - 3);
   for (int i = 0; i < iter; i++) {
     bbsint a = 2 + csrand(n - 3, ilog);
-    bbsint x = modexp(a, d, n);
+    bbsint x = modexp_half(a, d, n);
     if (x == 1 || x == n - 1)
       continue;
     int c = 0;
     for (int r = 1; r < s; r++) {
-      x = (((bbs2int) x) * x) % n;
+      x = x * x % n;
       if (x == n - 1) { c = 1; break; }
     }
     if(!c) return 0;
@@ -172,12 +185,12 @@ static int is_prime_high(bbsint n, int iter) {
       p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
       p |= 0b11; r = 2 * p + 1;
     } while (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
-          || modexp(2, r - 1, r) != 1);
+          || modexp_half(2, r - 1, r) != 1);
     do {
       q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
       q |= 0b11; r = 2 * q + 1;
     } while (p == q || !is_prime_low(r) || !is_prime_high(r, ROUNDS)
-           || modexp(2, r - 1, r) != 1);
+           || modexp_half(2, r - 1, r) != 1);
     *p1 = 2 * p + 1; *p2 = 2 * q + 1;
   }
 #else
@@ -191,7 +204,7 @@ static int is_prime_high(bbsint n, int iter) {
         p = csrand((((bbsint) 1) << (N_BITS / 2 - 2)), N_BITS / 2 - 2);
         p |= 0b11; r = 2 * p + 1;
       } while (!found && (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
-            || modexp(2, r - 1, r) != 1));
+            || modexp_half(2, r - 1, r) != 1));
       #pragma omp critical
       { if (!found) *p1 = 2 * p + 1, found = 1; }
     }
@@ -203,7 +216,7 @@ static int is_prime_high(bbsint n, int iter) {
         q = csrand((((bbsint) 1) << (N_BITS / 2 - 2)) - N_BITS, N_BITS / 2 - 2);
         q |= 0b11; r = 2 * q + 1;
       } while (!found && (!is_prime_low(r) || !is_prime_high(r, ROUNDS)
-            || modexp(2, r - 1, r) != 1 || 2 * q + 1 == p));
+            || modexp_half(2, r - 1, r) != 1 || 2 * q + 1 == p));
       #pragma omp critical
       { if (!found) *p2 = 2 * q + 1, found = 1; }
     }
@@ -252,6 +265,16 @@ static void bbs_step(bbs_t * bbs) {
   bbs2int sq = ((bbs2int) bbs->x) * bbs->x;
   bbs->x = sq % bbs->pq;
   bbs->pos++;
+}
+static bbsint modexp(bbsint base, bbsint e, bbsint mod) {
+  bbsint r = 1;
+  while (e) {
+    if (e & 1)
+      r = (((bbs2int) r) * base) % mod;
+    base = (((bbs2int) base) * base) % mod;
+    e >>= 1;
+  }
+  return r;
 }
 static void bbs_set(bbs_t * bbs, unsigned i) {
   bbsint arg = modexp(2, i, bbs->c);
