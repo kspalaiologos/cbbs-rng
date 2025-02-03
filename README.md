@@ -159,7 +159,7 @@ gcd((p-3)/2,(q-3)/2) = 2
 
 A better starting prime generation algorithm. Decrease the overhead
 of the generator. Currently the stream mode at 8192 bits of security
-generates outputs at around 5KB/s. This is not acceptable for most
+generates outputs at around 300KB/s. This is not acceptable for most
 applications. But BBS is also a bad algorithm performance-wise.
 
 We could use Legendre's conjecture or something similar to first narrow
