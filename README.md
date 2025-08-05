@@ -3,7 +3,7 @@ cbbs-rng - a fast research implementation of the cryptographically
 secure Blum Blum Shub random number generator. Supports seeking.
 Released to the public domain by Kamila Szewczyk - see COPYING.
 
-Project homepage: https://github.com/kspalaiologos/cbbs-rng
+Project homepage: https://github.com/iczelia/cbbs-rng
 
 ## Building
 
